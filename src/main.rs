@@ -1,25 +1,17 @@
 mod wordlist;
 use wordlist::LETTER_COUNT_LUT;
-extern crate char_iter;
 use std::collections::HashMap;
 use std::cmp;
+extern crate char_iter;
 
 type LetterCounts = [u8; 26];
 
-#[derive(Debug, PartialOrd, PartialEq)]
-struct UncertainLetter {
-    character: char,
-    range: Vec<u8>
+
+enum Uncertain {
+    ZeroOrOne(char),
+    Range(char)
 }
 
-impl UncertainLetter {
-    pub fn new(character: char, range: Vec<u8>) -> UncertainLetter {
-        UncertainLetter {
-            character: character,
-            range: range
-        }
-    }
-}
 
 fn char_to_index(c: &char) -> usize {
     // We store counts in 26-member arrays - this maps chars to their position in those arrays.
@@ -105,34 +97,22 @@ fn determine_solvable_letters(plural_static_counts: &LetterCounts) -> [bool; 26]
     solvable_letters
 }
 
-fn determine_zero_or_one_only_letters(solvable_letters: &[bool; 26]) -> [bool; 26] {
+fn determine_zero_or_one_only_letters(solvable_letters: &[bool; 26]) -> Vec<char> {
     // Some letters can only have a value of 0 or 1. These are those letters that don't occur in the
     // initial static words or any number word. If the preamble doesn't contain 'z', for example,
     // you can still have "and one z" at the end. This is really just a way to modulate the number
     // of o's, n's and e's.
     let letter_in_number_words = [false, false, false, false, true, true, true, true, true, false, false, true, false, true, true, false, false, true, true, true, true, true, true, true, true, false];
-    let mut zero_or_one_only = [false; 26];
+    let char_list: Vec<char> = char_iter::new('a', 'z').collect();
+    let mut chars = vec![];
     for (i, (number_word, solvable)) in letter_in_number_words.iter().zip(solvable_letters.iter()).enumerate() {
         if ! number_word && ! solvable {
-            zero_or_one_only[i] = true;
+            chars.push(char_list[i]);
         }
     }
-    zero_or_one_only
+    chars
 }
 
-fn determine_uncertain_letters(solvable_letters: &[bool; 26], zero_or_one_letters: &[bool; 26]) -> [bool; 26] {
-    // Some letters can only have a value of 0 or 1. These are those letters that don't occur in the
-    // initial static words or any number word. If the preamble doesn't contain 'z', for example,
-    // you can still have "and one z" at the end. This is really just a way to modulate the number
-    // of o's, n's and e's.
-    let mut uncertain = [false; 26];
-    for (i, (solvable, zero_or_one)) in solvable_letters.iter().zip(zero_or_one_letters.iter()).enumerate() {
-        if ! solvable && ! zero_or_one {
-            uncertain[i] = true;
-        }
-    }
-    uncertain
-}
 
 fn initalize_static_alphabet(plural_static_counts: &LetterCounts, solvable_letters: &[bool; 26]) -> [Option<u8>; 26] {
     let mut static_alphabet: [Option<u8>; 26] = [None; 26];
@@ -144,59 +124,6 @@ fn initalize_static_alphabet(plural_static_counts: &LetterCounts, solvable_lette
     static_alphabet
 }
 
-fn initalize_uncertain_alphabet(uncertain_letters: &[bool; 26]) -> Vec<UncertainLetter> {
-    // create a Vec of uncertain letters, with their bounds between 0 and 100. Additionally, we
-    // lower the upper bound by figuring out the absolute maximum any letter could be.
-
-    // the maximum possible counts that a letter can get from a single word
-    // for example, 'e' occurs 4 times in 'seventeen'
-    let number_words_max_char_counts = [
-     ('e', 4),
-     ('f', 3),
-     ('g', 2),
-     ('h', 2),
-     ('i', 2),
-     ('l', 1),
-     ('n', 4),
-     ('o', 2),
-     ('r', 2),
-     ('s', 2),
-     ('t', 3),
-     ('u', 1),
-     ('v', 2),
-     ('w', 2),
-     ('x', 2),
-     ('y', 1)
-    ].iter().cloned().collect::<HashMap<char, u8>>();
-
-    let uncertain_length: u8 = uncertain_letters.iter().fold(0, |acc, &x| if x { acc + 1} else { acc });
-
-    char_iter::new('a', 'z')
-        .zip(uncertain_letters.iter())
-        .filter(|&(_, uncertain)| *uncertain)
-        .map(|(character, _)| match number_words_max_char_counts.contains_key(&character) {
-            // if a static letter, when evaluated, would produce this character, we wouldn't account for it here.
-            // later, we will evaluate the static alphabet and raise the uncertain letter limits (both lower and upper)
-            true => {
-                let factor = number_words_max_char_counts[&character];
-                let upper_bound = if character == 's' { factor * uncertain_length + uncertain_length } else { factor * uncertain_length };
-                UncertainLetter::new(character, build_range(0, upper_bound + 1))
-            },
-            false => {
-                // I don't think this is possible, but I haven't proven it.
-                UncertainLetter::new(character, build_range(0, 100))
-            }})
-        .collect::<Vec<UncertainLetter>>()
-}
-
-
-fn initialize_zero_or_one_alphabet(zero_or_ones: &[bool; 26]) -> Vec<UncertainLetter> {
-    char_iter::new('a', 'z')
-        .zip(zero_or_ones.iter())
-        .filter(|&(_, zero_or_one)| *zero_or_one)
-        .map(|(character, _)| UncertainLetter::new(character, build_range(0, 2)))
-        .collect::<Vec<UncertainLetter>>()
-}
 
 fn evaluate_static_alphabet(static_alphabet: &[Option<u8>; 26]) -> LetterCounts {
     let mut accumulator = [0u8; 26];
@@ -218,15 +145,9 @@ fn add_letter_counts(counts1: &LetterCounts, counts2: &LetterCounts) -> LetterCo
     result
 }
 
-fn adjust_uncertain_alphabet(uncertain_alphabet: &[UncertainLetter], minimum_counts: &LetterCounts) -> Vec<UncertainLetter> {
-    let mut adjusted_alphabet = vec![];
-    for letter in uncertain_alphabet {
-        let index = char_to_index(&letter.character);
-        let minimum = minimum_counts[index];
-        let new_range: Vec<u8> = letter.range.iter().map(|&x| cmp::min(x + minimum, 99)).collect();
-        adjusted_alphabet.push(UncertainLetter::new(letter.character, new_range));
-    }
-    adjusted_alphabet
+
+fn solve(static_alphabet: &[Option<u8>; 26], ) {
+
 }
 
 fn main() {
@@ -240,23 +161,10 @@ fn main() {
     let solvable = determine_solvable_letters(&plural_static_counts);
     // zero or one only letters do not appear in any number word or in the initial static phrase,
     // so they can only occur 0 or 1 times (like in "one z")
-    let zero_or_one_only = determine_zero_or_one_only_letters(&solvable);
-    // uncertain letters can potentially have a large number of values
-    let uncertain = determine_uncertain_letters(&solvable, &zero_or_one_only);
-
-    // Prove that the three sets are completely distinct.
-    for (s, (z, u)) in solvable.iter().zip(zero_or_one_only.iter().zip(uncertain.iter())) {
-        assert!(! ((*s && *z) || (*s && *u) || (*z && *u)));
-    }
+    let zero_or_one_chars = determine_zero_or_one_only_letters(&solvable);
 
     // contains only letters with guaranteed certain counts.
     let static_alphabet = initalize_static_alphabet(&plural_static_counts, &solvable);
-    // create an uncertain alphabet with ranges bounded between 0 and 100
-    let uncertain_alphabet = initalize_uncertain_alphabet(&uncertain);
-    // put bounds on zero_or_one letters
-    let zero_or_one_alphabet = initialize_zero_or_one_alphabet(&zero_or_one_only);
-
-    assert!(26 >= uncertain_alphabet.len() + zero_or_one_alphabet.len());
 
     // Currently the static alphabet ONLY contains SOLVED letters. So we can evaluate it (that is,
     // turn counts of letters into written words, like a:3 becomes "three a's"
@@ -269,26 +177,39 @@ fn main() {
     // minimum value any letter can hold.
     let minimum_counts = add_letter_counts(&evaluated_static, &initial_static_counts);
 
-    // Taking the absolute lower bounds, we adjust the uncertain alphabet on the both sides.
-    // We have to add to both the lower and upper bounds since we don't know if these are just adding
-    // to all the counts in the uncertain alphabet
-    let adjusted_uncertain_alphabet = adjust_uncertain_alphabet(&uncertain_alphabet, &minimum_counts);
-
-    for letter in adjusted_uncertain_alphabet {
-        println!("{}", letter.character);
-    }
-
     // TODO: Refactor! You DON'T need to calculate the uncertain letters in advance!
     // TODO: In fact, they don't need to contain ranges!
     // TODO: It's crazy but true! You just need to iterate over them in a defined order (or maybe not?)
     // TODO: When you pop off an Uncertain Letter, you should decide ON THE FLY what its range is
     // TODO: The formula is, start with the minimum counts, and add the number_words_max_char_counts
-    // TODO: Or if it's zero or one, just do 0 and 1
-    // TODO: You can probably have an enum like:
-    enum Uncertain {
-        ZeroOrOne,
-        Range(char)
-    };
+    // TODO: Also evaluate the value being iterated over (the one that was just popped off) and add those
+    // TODO: counts to the rest of the uncertain alphabet
+    // TODO: If it's zero or one, just do 0 and 1
     // TODO: ooh yeah this is definitely the way
+
+    let number_words_max_char_counts: Vec<(char, u8)> = vec![
+        // TODO: explain these devil magic numbers
+        ('e', 4*16),
+        ('t', 3*15),
+        ('o', 2*14),
+        ('i', 2*13),
+        ('n', 4*12),
+        ('s', 2*11),
+        ('r', 2*10),
+        ('h', 2*9),
+        ('l', 1*8),
+        ('u', 1*7),
+        ('f', 3*6),
+        ('y', 1*5),
+        ('w', 2*5),
+        ('g', 2*4),
+        ('v', 2*3),
+        ('x', 2*2)
+    ].into_iter()
+     .chain(zero_or_one_chars
+            .iter()
+            .map(|&c| (c, 1u8))
+     )
+     .collect();
 
 }
