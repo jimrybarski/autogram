@@ -146,8 +146,24 @@ fn add_letter_counts(counts1: &LetterCounts, counts2: &LetterCounts) -> LetterCo
 }
 
 
-fn solve(static_alphabet: &[Option<u8>; 26], ) {
-
+fn solve(static_alphabet: &[Option<u8>; 26],
+         uncertain_alphabet: &[(char, u8)],
+         calculated_counts: LetterCounts) {
+    if let Some((new_static_letter, new_uncertain_alphabet)) = uncertain_alphabet.split_first() {
+        let &(character, max_count) = new_static_letter;
+        let index = char_to_index(&character);
+        let current_count = calculated_counts[index];
+        for count in current_count..max_count + current_count + 1 {
+            let mut new_static_alphabet = static_alphabet.clone();
+            new_static_alphabet[index] = Some(count);
+            let evaluated_counts = LETTER_COUNT_LUT[((count as usize - 1) * 26 + index)];
+            let new_calculated_counts = add_letter_counts(&evaluated_counts, &calculated_counts);
+            // TODO: Add validation here
+            solve(&new_static_alphabet, &new_uncertain_alphabet, new_calculated_counts);
+        }
+    } else {
+        // TODO: We've assigned values to all letters! Check whether the solution is valid!
+    }
 }
 
 fn main() {
@@ -187,7 +203,7 @@ fn main() {
     // TODO: If it's zero or one, just do 0 and 1
     // TODO: ooh yeah this is definitely the way
 
-    let number_words_max_char_counts: Vec<(char, u8)> = vec![
+    let uncertain_alphabet: Vec<(char, u8)> = vec![
         // TODO: explain these devil magic numbers
         ('e', 4*16),
         ('t', 3*15),
@@ -211,5 +227,6 @@ fn main() {
             .map(|&c| (c, 1u8))
      )
      .collect();
+
 
 }
