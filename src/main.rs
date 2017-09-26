@@ -1,16 +1,8 @@
 mod wordlist;
 use wordlist::LETTER_COUNT_LUT;
-use std::collections::HashMap;
-use std::cmp;
 extern crate char_iter;
 
 type LetterCounts = [u8; 26];
-
-
-enum Uncertain {
-    ZeroOrOne(char),
-    Range(char)
-}
 
 
 fn char_to_index(c: &char) -> usize {
@@ -46,17 +38,6 @@ fn char_to_index(c: &char) -> usize {
         'z' => 25,
         _ => panic!("Invalid character! Only a-z (lowercase) are allowed!")
     }
-}
-
-fn build_range(min: u8, max: u8) -> Vec<u8> {
-    // Makes a vector with integers that represent possible count values a letter could have
-    // We can't use just a min and max since we might be able to rule out some intermediate
-    // values, resulting in a discontinuous range
-    let mut range = vec![];
-    for i in min..max {
-        range.push(i);
-    }
-    range
 }
 
 fn count_initial_static_letters(preamble: &str) -> LetterCounts {
@@ -193,16 +174,6 @@ fn main() {
     // minimum value any letter can hold.
     let minimum_counts = add_letter_counts(&evaluated_static, &initial_static_counts);
 
-    // TODO: Refactor! You DON'T need to calculate the uncertain letters in advance!
-    // TODO: In fact, they don't need to contain ranges!
-    // TODO: It's crazy but true! You just need to iterate over them in a defined order (or maybe not?)
-    // TODO: When you pop off an Uncertain Letter, you should decide ON THE FLY what its range is
-    // TODO: The formula is, start with the minimum counts, and add the number_words_max_char_counts
-    // TODO: Also evaluate the value being iterated over (the one that was just popped off) and add those
-    // TODO: counts to the rest of the uncertain alphabet
-    // TODO: If it's zero or one, just do 0 and 1
-    // TODO: ooh yeah this is definitely the way
-
     let uncertain_alphabet: Vec<(char, u8)> = vec![
         // TODO: explain these devil magic numbers
         ('e', 4*16),
@@ -228,5 +199,6 @@ fn main() {
      )
      .collect();
 
-
+    // kick off the search
+    solve(&static_alphabet, &uncertain_alphabet, minimum_counts);
 }

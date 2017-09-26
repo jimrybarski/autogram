@@ -1,6 +1,3 @@
-use std::collections::HashSet;
-
-
 // To use this lookup table, use: (count - 1) * 26 + letter_index
 // For example, 14 e's is: 13 * 26 + 4 = 342
 pub static LETTER_COUNT_LUT: [[u8; 26]; 2574] = [
