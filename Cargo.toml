@@ -1,0 +1,6 @@
+[package]
+name = "autogram"
+version = "0.1.0"
+authors = ["Jim Rybarski <jim@rybarski.com>"]
+
+[dependencies]
