@@ -1,6 +1,8 @@
 mod wordlist;
 use wordlist::LETTER_COUNT_LUT;
 extern crate char_iter;
+extern crate rayon;
+use rayon::prelude::*;
 
 type LetterCounts = [u8; 26];
 
@@ -43,9 +45,9 @@ fn char_to_index(c: &char) -> usize {
 fn count_initial_static_letters(preamble: &str) -> LetterCounts {
     let mut array = [0; 26];
     for c in preamble
-             .chars()
-             .filter(|x| *x != ' ')
-             .chain("and".chars()) {
+        .chars()
+        .filter(|x| *x != ' ')
+        .chain("and".chars()) {
         let index = char_to_index(&c);
         array[index] += 1;
     }
@@ -127,6 +129,56 @@ fn add_letter_counts(counts1: &LetterCounts, counts2: &LetterCounts) -> LetterCo
 }
 
 
+fn has_low_counts(static_counts: &[Option<u8>; 26], calculated: &LetterCounts) -> bool {
+    for (calc, count) in calculated.iter().zip(static_counts.iter()) {
+        if let Some(c) = *count {
+            if c < *calc {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn parallel_solve(static_alphabet: &[Option<u8>; 26],
+         uncertain_alphabet: &[(char, u8)],
+         calculated_counts: LetterCounts) {
+    if let Some((new_static_letter, new_uncertain_alphabet)) = uncertain_alphabet.split_first() {
+        let &(character, max_count) = new_static_letter;
+        let index = char_to_index(&character);
+        let current_count = calculated_counts[index];
+        let range: Vec<u8> = (current_count..max_count + current_count + 1).collect();
+        range.par_iter().for_each(|count|
+        {
+            if character == 'e' {
+                println!("e: {}", count);
+            }
+            let mut new_static_alphabet = static_alphabet.clone();
+            new_static_alphabet[index] = Some(*count);
+            let new_calculated_counts = if *count > 0 {
+                let evaluated_counts = LETTER_COUNT_LUT[((*count as usize - 1) * 26 + index)];
+                add_letter_counts(&evaluated_counts, &calculated_counts)
+            } else {
+                calculated_counts
+            };
+            if ! has_low_counts(&new_static_alphabet, &new_calculated_counts) {
+                solve(&new_static_alphabet, &new_uncertain_alphabet, new_calculated_counts);
+            }
+        });
+    } else {
+        for (calculated, count) in calculated_counts.iter().zip(static_alphabet.iter()) {
+            if let Some(c) = *count {
+                if c != *calculated {
+                    return;
+                }
+            }
+        }
+        println!("VALID SOLUTION!");
+        println!("{:?}", static_alphabet);
+    }
+}
+
+
 fn solve(static_alphabet: &[Option<u8>; 26],
          uncertain_alphabet: &[(char, u8)],
          calculated_counts: LetterCounts) {
@@ -135,17 +187,35 @@ fn solve(static_alphabet: &[Option<u8>; 26],
         let index = char_to_index(&character);
         let current_count = calculated_counts[index];
         for count in current_count..max_count + current_count + 1 {
+            if character == 'e' {
+                println!("e: {}", count);
+            }
             let mut new_static_alphabet = static_alphabet.clone();
             new_static_alphabet[index] = Some(count);
-            let evaluated_counts = LETTER_COUNT_LUT[((count as usize - 1) * 26 + index)];
-            let new_calculated_counts = add_letter_counts(&evaluated_counts, &calculated_counts);
-            // TODO: Add validation here
+            let new_calculated_counts = if count > 0 {
+                let evaluated_counts = LETTER_COUNT_LUT[((count as usize - 1) * 26 + index)];
+                add_letter_counts(&evaluated_counts, &calculated_counts)
+            } else {
+                calculated_counts
+            };
+            if has_low_counts(&new_static_alphabet, &new_calculated_counts) {
+                continue;
+            }
             solve(&new_static_alphabet, &new_uncertain_alphabet, new_calculated_counts);
         }
     } else {
-        // TODO: We've assigned values to all letters! Check whether the solution is valid!
+        for (calculated, count) in calculated_counts.iter().zip(static_alphabet.iter()) {
+            if let Some(c) = *count {
+                if c != *calculated {
+                    return;
+                }
+            }
+        }
+        println!("VALID SOLUTION!");
+        println!("{:?}", static_alphabet);
     }
 }
+
 
 fn main() {
     // let preamble = "this bar trivia team name has";
@@ -176,6 +246,10 @@ fn main() {
 
     let uncertain_alphabet: Vec<(char, u8)> = vec![
         // TODO: explain these devil magic numbers
+
+        // TODO: Make sure this pre-calculated pruning won't result in a too-low-value situation
+        // Like if you have 10 x's from earlier letters, will that kill the search since it's greater
+        // than the precomputer 2*2 value for x?
         ('e', 4*16),
         ('t', 3*15),
         ('o', 2*14),
@@ -193,12 +267,12 @@ fn main() {
         ('v', 2*3),
         ('x', 2*2)
     ].into_iter()
-     .chain(zero_or_one_chars
+        .chain(zero_or_one_chars
             .iter()
             .map(|&c| (c, 1u8))
-     )
-     .collect();
+        )
+        .collect();
 
     // kick off the search
-    solve(&static_alphabet, &uncertain_alphabet, minimum_counts);
+    parallel_solve(&static_alphabet, &uncertain_alphabet, minimum_counts);
 }
