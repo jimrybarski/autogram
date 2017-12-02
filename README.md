@@ -8,10 +8,10 @@ characters. Take this example from [Wikipedia](https://en.wikipedia.org/wiki/Aut
 ## Inspiration
 
 In the mid- to late-nineties, I remember finding a website where dozens of autograms were listed, with hundreds of
-solutions to each. Two decades later, it occurred to me that it would be a fun problem to solve. I can't find that
-original website anymore, but if you happen to be the author, PLEASE reach out. I'd love to know how your solution
-worked. Especially since it must have been radically more performant given how slowly my own program runs, and how much
-slower computers were back then.
+solutions to each. Most notably, it claimed that the list contained *all possible solutions*. Two decades later, it
+occurred to me that it would be a fun problem to solve. I can't find that original website anymore, but if you happen to
+be the author, PLEASE reach out. I'd love to know how your solution worked. Especially since it must have been radically
+more performant given how slowly my own program runs, and how much slower computers were back then.
 
 I also did this partly to learn Rust better.
 
@@ -33,8 +33,8 @@ arguments.
 `./target/release/autogram this sentence has`
 
 This is currently quite slow - the only time I've gotten it to produce a result, it took around 12 hours. I
-suspect that for any given preamble, there are hundreds of solutions. Note that I've limited the maximum count for any
-letter to 99 to make things simple.
+suspect that for any given preamble, there are hundreds of solutions. However, unlike genetic algorithms or random
+searches, this is guaranteed to find all possible solutions (with counts up to 99 at least).
 
 ## Bar Trivia Team Name
 
