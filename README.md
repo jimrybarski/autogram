@@ -13,6 +13,8 @@ original website anymore, but if you happen to be the author, PLEASE reach out. 
 worked. Especially since it must have been radically more performant given how slowly my own program runs, and how much
 slower computers were back then.
 
+I also did this partly to learn Rust better.
+
 ## Installation
 
 You will need a [Rust](https://www.rust-lang.org/en-US/) compiler installed.
@@ -21,17 +23,16 @@ You will need a [Rust](https://www.rust-lang.org/en-US/) compiler installed.
 git clone https://github.com/jimrybarski/autogram.git
 cd autogram
 cargo build --release
-
 ```
 
 ## Usage
 
 Simple invoke the binary with the "preamble" (the fixed part of the sentence at the beginning) as space-separated
-command line arguments.
+arguments.
 
 `./target/release/autogram this sentence has`
 
-Note that this is currently quite slow - the only time I've gotten it to produce a result, it took around 12 hours. I
+This is currently quite slow - the only time I've gotten it to produce a result, it took around 12 hours. I
 suspect that for any given preamble, there are hundreds of solutions. Note that I've limited the maximum count for any
 letter to 99 to make things simple.
 
