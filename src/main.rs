@@ -1,8 +1,10 @@
 mod wordlist;
 use wordlist::LETTER_COUNT_LUT;
+mod output;
 extern crate char_iter;
 extern crate rayon;
 use rayon::prelude::*;
+use std::env;
 
 type LetterCounts = [u8; 26];
 
@@ -36,40 +38,196 @@ static UNCERTAIN_MAX_COUNTS_PER_WORD: [(usize, u8); 16] = [(4,  4),
                                                            (23, 2)];
 
 
-fn char_to_index(c: &char) -> usize {
+fn main() {
+    let preamble_vec: Vec<String> = env::args().skip(1).map(|s| String::from(s)).collect();
+    let preamble: String = preamble_vec.join(" ");
+    let initial_static_counts = count_initial_static_letters(&preamble);
+    let plural_static_counts = add_minimum_s_count(&initial_static_counts);
+
+    // exhaustively assign each letter to one of three sets
+    // solvable letters are those whose values can be determined in advance
+    let solvable = determine_solvable_letters(&plural_static_counts);
+    // zero or one only letters do not appear in any number word or in the initial static phrase,
+    // so they can only occur 0 or 1 times (like in "one z")
+    let zero_or_one_chars = determine_zero_or_one_only_letters(&solvable);
+    // contains only letters with guaranteed certain counts.
+    let static_alphabet = initalize_static_alphabet(&plural_static_counts, &solvable);
+
+    // Currently the static alphabet ONLY contains SOLVED letters. So we can evaluate it (that is,
+    // turn counts of letters into written words, like a:3 becomes "three a's"
+    // We then count up all the resulting letters. With "three a's" for example, we know there MUST
+    // be at least two e's. We do this for every solved letter and sum them all together.
+    let evaluated_static = evaluate_static_alphabet(&static_alphabet);
+
+    // We can add the initial static counts to the evaluated counts we just generated, since there's
+    // no overlap whatsoever (and thus no double counting). These values are therefore the absolute
+    // minimum value any letter can hold.
+    let minimum_counts = add_letter_counts(&evaluated_static, &initial_static_counts);
+
+    let zero_or_one_count = zero_or_one_chars.len() as u8;
+
+    let uncertain_alphabet: Vec<(char, UncertainLetter)> = vec![
+        // For each letter, there's some maximum number of times it can occur per number word. For
+        // example, 't' occurs three times in 'thirty-two'. If all counts are 32, then 't' will
+        // occur 3*15 times. We know to use 15, because 't' is the 2nd letter we iterate over, and
+        // there are 16 variable letters. As we descend through this fixed-order list, the
+        // multiplicative factor shrinks, thus massively reducing the search space. This number does
+        // not represent a strict upper bound, but rather, a maximum bound on the additional counts
+        // that need to be considered on top of the ones that are required by the static counts. For
+        // example, if we have 2 y's, we will have AT LEAST 1 't' (from the "two" in "two y's"), and
+        // on top of that we could, in principle, have an additional 45 t's.
+        ('e', UncertainLetter::Variable( 4 * 16 + zero_or_one_count )),
+    	('t', UncertainLetter::Variable( 3 * 15                     )),
+        ('o', UncertainLetter::Variable( 2 * 14 + zero_or_one_count )),
+        ('i', UncertainLetter::Variable( 2 * 13                     )),
+        ('n', UncertainLetter::Variable( 4 * 12 + zero_or_one_count )),
+        ('s', UncertainLetter::Variable( 2 * 11                     )),
+        ('r', UncertainLetter::Variable( 2 * 10                     )),
+        ('h', UncertainLetter::Variable( 2 *  9                     )),
+        ('l', UncertainLetter::Variable(      8                     )),
+        ('u', UncertainLetter::Variable(      7                     )),
+        ('f', UncertainLetter::Variable( 3 *  6                     )),
+        ('y', UncertainLetter::Variable(      5                     )),
+        ('w', UncertainLetter::Variable( 2 *  5                     )),
+        ('g', UncertainLetter::Variable( 2 *  4                     )),
+        ('v', UncertainLetter::Variable( 2 *  3                     )),
+        ('x', UncertainLetter::Variable( 2 *  2                     ))
+    ].into_iter()
+        .chain(zero_or_one_chars
+            .iter()
+            .map(|&c| (c, UncertainLetter::ZeroOrOne))
+        )
+        .collect();
+
+    // kick off the search
+    solve_parallel(&static_alphabet, &uncertain_alphabet, &minimum_counts, &preamble);
+}
+
+
+fn solve_parallel(static_alphabet: &[Option<u8>; 26],
+         uncertain_alphabet: &[(char, UncertainLetter)],
+         calculated_counts: &LetterCounts,
+         preamble: &str) {
+    if let Some((new_static_letter, new_uncertain_alphabet)) = uncertain_alphabet.split_first() {
+        let (index, iter_range, uncertain_remaining, zero_or_one_remaining) = setup_descent(new_uncertain_alphabet,
+                                                                                            new_static_letter,
+                                                                                            calculated_counts);
+        iter_range.par_iter().for_each(|&count| {
+            let (new_static_alphabet, new_calculated_counts) = descend(static_alphabet, calculated_counts, count, index);
+            if ! partial_solution_valid(&new_static_alphabet,
+                                        &new_calculated_counts,
+                                        uncertain_remaining,
+                                        zero_or_one_remaining) {
+                return;
+            }
+            solve(&new_static_alphabet, new_uncertain_alphabet, &new_calculated_counts, preamble);
+        });
+    }
+    else {
+        println!("This is not a valid preamble.");
+    }
+}
+
+
+fn solve(static_alphabet: &[Option<u8>; 26],
+         uncertain_alphabet: &[(char, UncertainLetter)],
+         calculated_counts: &LetterCounts,
+         preamble: &str) {
+    if let Some((new_static_letter, new_uncertain_alphabet)) = uncertain_alphabet.split_first() {
+        let (index, iter_range, uncertain_remaining, zero_or_one_remaining) = setup_descent(new_uncertain_alphabet,
+                                                                                            new_static_letter,
+                                                                                            calculated_counts);
+        for count in iter_range {
+            let (new_static_alphabet, new_calculated_counts) = descend(static_alphabet, calculated_counts, count, index);
+            if ! partial_solution_valid(&new_static_alphabet,
+                                        &new_calculated_counts,
+                                        uncertain_remaining,
+                                        zero_or_one_remaining) {
+                continue;
+            }
+            solve(&new_static_alphabet, new_uncertain_alphabet, &new_calculated_counts, preamble);
+        }
+    }
+    // We might have a solution! Let's check and see if it's correct.
+    else if validate_solution(calculated_counts, static_alphabet) {
+        let written_solution = output::build_written_solution(static_alphabet, preamble);
+        println!("{}", written_solution);
+    }
+}
+
+
+fn setup_descent(new_uncertain_alphabet: &[(char, UncertainLetter)],
+                 new_static_letter: &(char, UncertainLetter),
+                 calculated_counts: &LetterCounts) -> (usize, std::vec::Vec<u8>, u8, u8) {
+    let (uncertain_remaining, zero_or_one_remaining) = new_uncertain_alphabet
+            .iter()
+            .map(|&(_, ref uncertain_letter)| match *uncertain_letter {
+                UncertainLetter::Variable(_) => (1u8, 0u8),
+                UncertainLetter::ZeroOrOne => (0u8, 1u8)
+            })
+            .fold((0u8, 0u8), |(var_acc, zoo_acc), (var_inc, zoo_inc)| (var_acc + var_inc, zoo_acc + zoo_inc));
+
+    let &(character, ref uncertain_letter) = new_static_letter;
+    let max_count = match *uncertain_letter {
+        UncertainLetter::Variable(c) => c,
+        UncertainLetter::ZeroOrOne => 1
+    };
+
+    let index = char_to_index(&character).unwrap();
+    let current_count = calculated_counts[index];
+    let iter_range: Vec<u8> = (current_count..max_count + current_count + 1).collect();
+    (index, iter_range, uncertain_remaining, zero_or_one_remaining)
+}
+
+
+fn descend(static_alphabet: &[Option<u8>; 26], calculated_counts: &LetterCounts, count: u8, index: usize) -> ([Option<u8>; 26], LetterCounts) {
+    let mut new_static_alphabet = *static_alphabet;
+    new_static_alphabet[index] = Some(count);
+    let new_calculated_counts = if count > 0 {
+        let evaluated_counts = LETTER_COUNT_LUT[((count as usize - 1) * 26 + index)];
+        add_letter_counts(&evaluated_counts, calculated_counts)
+    } else {
+        *calculated_counts
+    };
+    (new_static_alphabet, new_calculated_counts)
+}
+
+
+fn char_to_index(c: &char) -> Option<usize> {
     // We store counts in 26-member arrays - this maps chars to their position in those arrays.
     // Note that this function is implemented as a long jump table so we can't use it for anything
     // outside of the initialization phase.
     match *c {
-        'a' => 0,
-        'b' => 1,
-        'c' => 2,
-        'd' => 3,
-        'e' => 4,
-        'f' => 5,
-        'g' => 6,
-        'h' => 7,
-        'i' => 8,
-        'j' => 9,
-        'k' => 10,
-        'l' => 11,
-        'm' => 12,
-        'n' => 13,
-        'o' => 14,
-        'p' => 15,
-        'q' => 16,
-        'r' => 17,
-        's' => 18,
-        't' => 19,
-        'u' => 20,
-        'v' => 21,
-        'w' => 22,
-        'x' => 23,
-        'y' => 24,
-        'z' => 25,
-        _ => panic!("Invalid character! Only a-z (lowercase) are allowed!")
+        'a' => Some(0),
+        'b' => Some(1),
+        'c' => Some(2),
+        'd' => Some(3),
+        'e' => Some(4),
+        'f' => Some(5),
+        'g' => Some(6),
+        'h' => Some(7),
+        'i' => Some(8),
+        'j' => Some(9),
+        'k' => Some(10),
+        'l' => Some(11),
+        'm' => Some(12),
+        'n' => Some(13),
+        'o' => Some(14),
+        'p' => Some(15),
+        'q' => Some(16),
+        'r' => Some(17),
+        's' => Some(18),
+        't' => Some(19),
+        'u' => Some(20),
+        'v' => Some(21),
+        'w' => Some(22),
+        'x' => Some(23),
+        'y' => Some(24),
+        'z' => Some(25),
+        _ => None
     }
 }
+
 
 fn count_initial_static_letters(preamble: &str) -> LetterCounts {
     let mut array = [0; 26];
@@ -77,8 +235,9 @@ fn count_initial_static_letters(preamble: &str) -> LetterCounts {
         .chars()
         .filter(|x| *x != ' ')
         .chain("and".chars()) {
-        let index = char_to_index(&c);
-        array[index] += 1;
+        if let Some(index) = char_to_index(&c) {
+            array[index] += 1;
+        }
     }
     array
 }
@@ -174,118 +333,45 @@ fn has_low_counts(static_counts: &[Option<u8>; 26], calculated: &LetterCounts) -
     false
 }
 
-fn solve_parallel(static_alphabet: &[Option<u8>; 26],
-         uncertain_alphabet: &[(char, UncertainLetter)],
-         calculated_counts: &LetterCounts) {
-    if let Some((new_static_letter, new_uncertain_alphabet)) = uncertain_alphabet.split_first() {
-        let (uncertain_remaining, zero_or_one_remaining) = new_uncertain_alphabet
-            .iter()
-            .map(|&(_, ref uncertain_letter)| match *uncertain_letter {
-                UncertainLetter::Variable(_) => (1u8, 0u8),
-                UncertainLetter::ZeroOrOne => (0u8, 1u8)
-            })
-            .fold((0u8, 0u8), |(var_acc, zoo_acc), (var_inc, zoo_inc)| (var_acc + var_inc, zoo_acc + zoo_inc));
 
-        let &(character, ref uncertain_letter) = new_static_letter;
-        let max_count = match *uncertain_letter {
-            UncertainLetter::Variable(c) => c,
-            UncertainLetter::ZeroOrOne => 1
-        };
-
-        let index = char_to_index(&character);
-        let current_count = calculated_counts[index];
-        let iter_range: Vec<u8> = (current_count..max_count + current_count + 1).collect();
-        iter_range.par_iter().for_each(|&count| {
-            let mut new_static_alphabet = *static_alphabet;
-            new_static_alphabet[index] = Some(count);
-            let new_calculated_counts = if count > 0 {
-                let evaluated_counts = LETTER_COUNT_LUT[((count as usize - 1) * 26 + index)];
-                add_letter_counts(&evaluated_counts, calculated_counts)
-            } else {
-                *calculated_counts
-            };
-            if has_low_counts(&new_static_alphabet, &new_calculated_counts) {
-                return;
-            }
-            // See if we've not trimmed the upper bounds enough
-            for &(index, count) in &UNCERTAIN_MAX_COUNTS_PER_WORD {
-                if let Some(static_count) = new_static_alphabet[index] {
-                    // different rules if it's in "one" b/c of zero_or_one letters
-                    let calc_count = new_calculated_counts[index];
-                    let max_possible_count = if ONE_INDEXES.contains(&index) {
-                        count * uncertain_remaining + zero_or_one_remaining + calc_count
-                    } else {
-                        count * uncertain_remaining + calc_count
-                    };
-                    if static_count > max_possible_count {
-                        return;
-                    }
-                }
-            }
-            solve(&new_static_alphabet, new_uncertain_alphabet, &new_calculated_counts);
-        });
+fn partial_solution_valid(new_static_alphabet: &[Option<u8>; 26],
+                          new_calculated_counts: &LetterCounts,
+                          uncertain_remaining: u8,
+                          zero_or_one_remaining: u8) -> bool {
+    if has_low_counts(&new_static_alphabet, &new_calculated_counts) {
+        return false;
     }
-    // We might have a solution! Let's check and see if it's correct.
-    else if validate_solution(calculated_counts, static_alphabet) {
-        println!("{:?}", static_alphabet);
+    if contains_excessive_counts(&new_static_alphabet,
+                                 &new_calculated_counts,
+                                 uncertain_remaining,
+                                 zero_or_one_remaining) {
+        return false;
     }
+    true
 }
 
 
-fn solve(static_alphabet: &[Option<u8>; 26],
-         uncertain_alphabet: &[(char, UncertainLetter)],
-         calculated_counts: &LetterCounts) {
-    if let Some((new_static_letter, new_uncertain_alphabet)) = uncertain_alphabet.split_first() {
-        let (uncertain_remaining, zero_or_one_remaining) = new_uncertain_alphabet
-            .iter()
-            .map(|&(_, ref uncertain_letter)| match *uncertain_letter {
-                UncertainLetter::Variable(_) => (1u8, 0u8),
-                UncertainLetter::ZeroOrOne => (0u8, 1u8)
-            })
-            .fold((0u8, 0u8), |(var_acc, zoo_acc), (var_inc, zoo_inc)| (var_acc + var_inc, zoo_acc + zoo_inc));
-
-        let &(character, ref uncertain_letter) = new_static_letter;
-        let max_count = match *uncertain_letter {
-            UncertainLetter::Variable(c) => c,
-            UncertainLetter::ZeroOrOne => 1
-        };
-        let index = char_to_index(&character);
-        let current_count = calculated_counts[index];
-        'count_loop: for count in current_count..max_count + current_count + 1 {
-            let mut new_static_alphabet = *static_alphabet;
-            new_static_alphabet[index] = Some(count);
-            let new_calculated_counts = if count > 0 {
-                let evaluated_counts = LETTER_COUNT_LUT[((count as usize - 1) * 26 + index)];
-                add_letter_counts(&evaluated_counts, calculated_counts)
+fn contains_excessive_counts(new_static_alphabet: &[Option<u8>; 26],
+                             new_calculated_counts: &LetterCounts,
+                             uncertain_remaining: u8,
+                             zero_or_one_remaining: u8) -> bool {
+    for &(index, count) in &UNCERTAIN_MAX_COUNTS_PER_WORD {
+        if let Some(static_count) = new_static_alphabet[index] {
+            // different rules if it's in "one" b/c of zero_or_one letters
+            let calc_count = new_calculated_counts[index];
+            let max_possible_count = if ONE_INDEXES.contains(&index) {
+                count * uncertain_remaining + zero_or_one_remaining + calc_count
             } else {
-                *calculated_counts
+                count * uncertain_remaining + calc_count
             };
-            if has_low_counts(&new_static_alphabet, &new_calculated_counts) {
-                continue;
+            if static_count > max_possible_count {
+                return true;
             }
-            // See if we've not trimmed the upper bounds enough
-            for &(index, count) in &UNCERTAIN_MAX_COUNTS_PER_WORD {
-                if let Some(static_count) = new_static_alphabet[index] {
-                    let calc_count = new_calculated_counts[index];
-                    let max_possible_count = if ONE_INDEXES.contains(&index) {
-                        // different rules if it's in "one" b/c of zero_or_one letters
-                        count * uncertain_remaining + zero_or_one_remaining + calc_count
-                    } else {
-                        count * uncertain_remaining + calc_count
-                    };
-                    if static_count > max_possible_count {
-                        continue 'count_loop;
-                    }
-                }
-            }
-            solve(&new_static_alphabet, new_uncertain_alphabet, &new_calculated_counts);
         }
     }
-    // We might have a solution! Let's check and see if it's correct.
-    else if validate_solution(calculated_counts, static_alphabet) {
-        println!("{:?}", static_alphabet);
-    }
+    false
 }
+
 
 fn validate_solution(calculated_counts: &LetterCounts, static_alphabet: &[Option<u8>; 26]) -> bool {
     for (calculated, count) in calculated_counts.iter().zip(static_alphabet.iter()) {
@@ -298,66 +384,66 @@ fn validate_solution(calculated_counts: &LetterCounts, static_alphabet: &[Option
     true
 }
 
-fn main() {
-    let preamble = "this billys on burnet bar trivia team name has";
-    let initial_static_counts = count_initial_static_letters(preamble);
-    let plural_static_counts = add_minimum_s_count(&initial_static_counts);
 
-    // exhaustively assign each letter to one of three sets
-    // solvable letters are those whose values can be determined in advance
-    let solvable = determine_solvable_letters(&plural_static_counts);
-    // zero or one only letters do not appear in any number word or in the initial static phrase,
-    // so they can only occur 0 or 1 times (like in "one z")
-    let zero_or_one_chars = determine_zero_or_one_only_letters(&solvable);
-    // contains only letters with guaranteed certain counts.
-    let static_alphabet = initalize_static_alphabet(&plural_static_counts, &solvable);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Currently the static alphabet ONLY contains SOLVED letters. So we can evaluate it (that is,
-    // turn counts of letters into written words, like a:3 becomes "three a's"
-    // We then count up all the resulting letters. With "three a's" for example, we know there MUST
-    // be at least two e's. We do this for every solved letter and sum them all together.
-    let evaluated_static = evaluate_static_alphabet(&static_alphabet);
+    #[test]
+    fn test_build_written_solution() {
+        let static_alphabet = [Some(2), None, Some(2), Some(2), Some(28), Some(5), Some(3), Some(8), Some(11), None, None, Some(3), Some(2), Some(13), Some(9), Some(2), None, Some(5), Some(25), Some(23), None, Some(6), Some(10), Some(2), Some(5), Some(1)];
+        let written = output::build_written_solution(&static_alphabet, "this sentence employs");
+        assert_eq!(written, "this sentence employs two a's, two c's, two d's, twenty-eight e's, five f's, three g's, eight h's, eleven i's, three l's, two m's, thirteen n's, nine o's, two p's, five r's, twenty-five s's, twenty-three t's, six v's, ten w's, two x's, five y's and one z.")
+    }
 
-    // We can add the initial static counts to the evaluated counts we just generated, since there's
-    // no overlap whatsoever (and thus no double counting). These values are therefore the absolute
-    // minimum value any letter can hold.
-    let minimum_counts = add_letter_counts(&evaluated_static, &initial_static_counts);
+    #[test]
+    fn test_validate_solution() {
+        let static_alphabet = [Some(2), None, Some(2), Some(2), Some(28), Some(5), Some(3), Some(8), Some(11), None, None, Some(3), Some(2), Some(13), Some(9), Some(2), None, Some(5), Some(25), Some(23), None, Some(6), Some(10), Some(2), Some(5), Some(1)];
+        let initial_static_counts = count_initial_static_letters("this sentence employs");
+        let letter_counts = evaluate_static_alphabet(&static_alphabet);
+        let summed_counts = add_letter_counts(&initial_static_counts, &letter_counts);
 
-    let zero_or_one_count = zero_or_one_chars.len() as u8;
+        let mut results : Vec<bool> = vec![];
+        for (proposed, evaluated) in static_alphabet.iter().zip(summed_counts.iter()) {
+            match *proposed {
+                Some(p) => { results.push(p == *evaluated); },
+                None => { results.push(0 == *evaluated); }
+            }
+        }
+        assert!(! results.contains(&false));
+    }
 
-    let uncertain_alphabet: Vec<(char, UncertainLetter)> = vec![
-        // For each letter, there's some maximum number of times it can occur per number word. For
-        // example, 't' occurs three times in 'thirty-two'. If all counts are 32, then 't' will
-        // occur 3*15 times. We know to use 15, because 't' is the 2nd letter we iterate over, and
-        // there are 16 variable letters. As we descend through this fixed-order list, the
-        // multiplicative factor shrinks, thus massively reducing the search space. This number does
-        // not represent a strict upper bound, but rather, a maximum bound on the additional counts
-        // that need to be considered on top of the ones that are required by the static counts. For
-        // example, if we have 2 y's, we will have AT LEAST 1 't' (from the "two" in "two y's"), and
-        // on top of that we could, in principle, have an additional 45 t's.
-        ('e', UncertainLetter::Variable( 4 * 16 + zero_or_one_count )),
-    	('t', UncertainLetter::Variable( 3 * 15                     )),
-        ('o', UncertainLetter::Variable( 2 * 14 + zero_or_one_count )),
-        ('i', UncertainLetter::Variable( 2 * 13                     )),
-        ('n', UncertainLetter::Variable( 4 * 12 + zero_or_one_count )),
-        ('s', UncertainLetter::Variable( 2 * 11                     )),
-        ('r', UncertainLetter::Variable( 2 * 10                     )),
-        ('h', UncertainLetter::Variable( 2 *  9                     )),
-        ('l', UncertainLetter::Variable(      8                     )),
-        ('u', UncertainLetter::Variable(      7                     )),
-        ('f', UncertainLetter::Variable( 3 *  6                     )),
-        ('y', UncertainLetter::Variable(      5                     )),
-        ('w', UncertainLetter::Variable( 2 *  5                     )),
-        ('g', UncertainLetter::Variable( 2 *  4                     )),
-        ('v', UncertainLetter::Variable( 2 *  3                     )),
-        ('x', UncertainLetter::Variable( 2 *  2                     ))
-    ].into_iter()
-        .chain(zero_or_one_chars
-            .iter()
-            .map(|&c| (c, UncertainLetter::ZeroOrOne))
-        )
-        .collect();
+    #[test]
+    fn test_validate_solution_invalid() {
+        let static_alphabet = [Some(2), None, Some(2), Some(2), Some(28), Some(4), Some(3), Some(8), Some(11), None, None, Some(3), Some(2), Some(13), Some(9), Some(2), None, Some(5), Some(25), Some(23), None, Some(6), Some(10), Some(2), Some(5), Some(1)];
+        let initial_static_counts = count_initial_static_letters("this sentence employs");
+        let letter_counts = evaluate_static_alphabet(&static_alphabet);
+        let summed_counts = add_letter_counts(&initial_static_counts, &letter_counts);
 
-    // kick off the search
-    solve_parallel(&static_alphabet, &uncertain_alphabet, &minimum_counts);
+        let mut results : Vec<bool> = vec![];
+        for (proposed, evaluated) in static_alphabet.iter().zip(summed_counts.iter()) {
+            match *proposed {
+                Some(p) => { results.push(p == *evaluated); },
+                None => { results.push(0 == *evaluated); }
+            }
+        }
+        assert!(results.contains(&false));
+    }
+
+    #[test]
+    fn test_validate_solution_invalid2() {
+        let static_alphabet = [Some(2), None, Some(2), Some(2), Some(28), Some(5), Some(3), Some(8), Some(11), None, None, Some(3), Some(2), Some(13), Some(9), Some(2), None, Some(5), Some(25), Some(23), None, Some(6), Some(10), Some(2), Some(5), Some(1)];
+        let initial_static_counts = count_initial_static_letters("this sentence has");
+        let letter_counts = evaluate_static_alphabet(&static_alphabet);
+        let summed_counts = add_letter_counts(&initial_static_counts, &letter_counts);
+
+        let mut results : Vec<bool> = vec![];
+        for (proposed, evaluated) in static_alphabet.iter().zip(summed_counts.iter()) {
+            match *proposed {
+                Some(p) => { results.push(p == *evaluated); },
+                None => { results.push(0 == *evaluated); }
+            }
+        }
+        assert!(results.contains(&false));
+    }
 }
