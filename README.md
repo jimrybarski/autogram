@@ -5,6 +5,9 @@ characters. Take this example from [Wikipedia](https://en.wikipedia.org/wiki/Aut
 
 > This sentence employs two a’s, two c’s, two d’s, twenty-eight e’s, five f’s, three g’s, eight h’s, eleven i’s, three l’s, two m’s, thirteen n’s, nine o’s, two p’s, five r’s, twenty-five s’s, twenty-three t’s, six v’s, ten w’s, two x’s, five y’s, and one z.
 
+The search process is completely deterministic, so it is guaranteed to find all possible solutions (with counts up to 99
+at least).
+
 ## Inspiration
 
 In the mid- to late-nineties, I remember finding a website where dozens of autograms were listed, with hundreds of
@@ -32,9 +35,8 @@ arguments.
 
 `./target/release/autogram this sentence has`
 
-This is currently quite slow - the only time I've gotten it to produce a result, it took around 12 hours. I
-suspect that for any given preamble, there are hundreds of solutions. However, unlike genetic algorithms or random
-searches, this is guaranteed to find all possible solutions (with counts up to 99 at least).
+This is currently quite slow - the only time I've gotten it to produce a result, it took around 12 hours on a four-core
+i5 laptop. I suspect that for any given preamble, there are hundreds of solutions.
 
 ## Bar Trivia Team Name
 
