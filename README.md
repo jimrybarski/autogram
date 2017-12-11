@@ -10,12 +10,10 @@ at least).
 
 ## Inspiration
 
-In the mid- to late-nineties, I remember finding a website where dozens of autograms were listed, with hundreds of
-solutions to each. Most notably, it claimed that the list contained *all possible solutions*. Two decades later, it
-occurred to me that it would be a fun problem to solve. I can't find that original website anymore, but if you happen to
-be the author, PLEASE reach out. I'd love to know how your solution worked. Especially since it must have been radically
-more performant given how slowly my own program runs, and how much slower computers were back then.
-
+In the mid- to late-nineties, I found [this site](https://selfreferentialsentences.blogspot.com/), which listed hundreds of
+autograms (thanks to Matthias Belz for helping me find it again). Although I didn't find it again until after I wrote
+this library, I did decide to try my hand at a solution just for fun. This library will find all possible solutions with
+counts up to 99, though it is extremely slow (the only time it's found a solution took 12 hours on a 4-core Intel i5 laptop).
 I also did this partly to learn Rust better.
 
 ## Installation
