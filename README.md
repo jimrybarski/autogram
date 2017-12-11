@@ -13,8 +13,7 @@ at least).
 In the mid- to late-nineties, I found [this site](https://selfreferentialsentences.blogspot.com/), which listed hundreds of
 autograms (thanks to Matthias Belz for helping me find it again). Although I didn't find it again until after I wrote
 this library, I did decide to try my hand at a solution just for fun. This library will find all possible solutions with
-counts up to 99, though it is extremely slow (the only time it's found a solution took 12 hours on a 4-core Intel i5 laptop).
-I also did this partly to learn Rust better.
+counts up to 99, and while it is extremely slow, it should find something in a day or two. I also did this partly to learn Rust better.
 
 ## Installation
 
