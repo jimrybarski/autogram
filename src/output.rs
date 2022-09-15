@@ -3,6 +3,9 @@ pub fn build_written_solution(static_alphabet: &[Option<u8>; 26], preamble: &str
     let mut answer = format!("{} ", preamble);
     for i in 0..end {
         if let Some(count) = static_alphabet[i] {
+            if count == 0 {
+                continue;
+            }
             let word = count_to_string(i, count);
             answer.push_str(&format!("{}", &word));
             if i == end - 1 {
